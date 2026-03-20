@@ -3188,27 +3188,41 @@ function getFinnhubKey() {
   return localStorage.getItem('finnhub_key') || '';
 }
 function saveFinnhubKey(key) {
-  localStorage.setItem('finnhub_key', key.trim());
-  document.getElementById('finnhub-notice').style.display = 'none';
+  const trimmed = key.trim();
+  if (!trimmed) return;
+  localStorage.setItem('finnhub_key', trimmed);
+  const notice = document.getElementById('finnhub-notice');
+  const badge  = document.getElementById('key-saved-badge');
+  if (notice) notice.style.display = 'none';
+  if (badge)  { badge.style.display = 'inline'; setTimeout(() => badge.style.display = 'none', 2000); }
 }
 
 async function finnhub(endpoint, params = {}) {
   const key = getFinnhubKey();
   if (!key) throw new Error('NO_KEY');
-  const qs = Object.entries({ ...params, token: key }).map(([k,v]) => k+'='+encodeURIComponent(v)).join('&');
+  const qs = Object.entries({ ...params, token: key })
+    .map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&');
   const res = await fetch('https://finnhub.io/api/v1/' + endpoint + '?' + qs);
-  if (!res.ok) throw new Error('Finnhub ' + res.status);
-  return res.json();
+  if (res.status === 401 || res.status === 403) throw new Error('Invalid API key — check your Finnhub key');
+  if (res.status === 429) throw new Error('Rate limit hit — wait a moment and try again');
+  if (!res.ok) throw new Error('Finnhub error ' + res.status);
+  const data = await res.json();
+  if (data.error) throw new Error('Finnhub: ' + data.error);
+  return data;
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 function initResearch() {
-  const key = getFinnhubKey();
-  if (!key) {
-    document.getElementById('finnhub-notice').style.display = 'block';
-  }
+  const key      = getFinnhubKey();
   const keyInput = document.getElementById('finnhub-key');
-  if (key && keyInput) keyInput.value = key;
+  const notice   = document.getElementById('finnhub-notice');
+
+  if (keyInput && key) {
+    keyInput.value = key; // restore saved key into field
+  }
+  if (!key && notice) {
+    notice.style.display = 'block';
+  }
   renderWatchlist();
 }
 
@@ -3235,9 +3249,9 @@ async function lookupTicker(sym) {
 
   const key = getFinnhubKey();
   if (!key) {
-    document.getElementById('r-name').textContent = 'Enter your Finnhub API key to load live data';
-    document.getElementById('chart-stock-loading').textContent = 'API key required';
-    // Still run AI analysis without live data
+    document.getElementById('r-name').textContent = '⚠ Enter your Finnhub API key in the field above, then search again.';
+    document.getElementById('chart-stock-loading').style.display = 'none';
+    document.getElementById('r-fundamentals').innerHTML = '<div style="color:var(--gold);font-size:12px">API key required for live data.</div>';
     return;
   }
 
@@ -3249,13 +3263,17 @@ async function lookupTicker(sym) {
       finnhub('stock/metric', { symbol: currentTicker, metric: 'all' })
     ]);
 
-    // Quote
+    // Quote — check for valid data (Finnhub returns 0s for unknown tickers)
+    if (!quote.c && !profile.name) {
+      throw new Error('Ticker "' + currentTicker + '" not found. Check the symbol and try again.');
+    }
+
     const price  = quote.c || 0;
     const change = quote.d || 0;
     const changePct = quote.dp || 0;
     const isUp   = change >= 0;
-    document.getElementById('r-price').textContent  = '$' + price.toFixed(2);
-    document.getElementById('r-change').innerHTML   = `<span class="${isUp?'up':'down'}">${isUp?'+':''}${change.toFixed(2)} (${isUp?'+':''}${changePct.toFixed(2)}%)</span> today`;
+    document.getElementById('r-price').textContent  = price > 0 ? '$' + price.toFixed(2) : '—';
+    document.getElementById('r-change').innerHTML   = price > 0 ? `<span class="${isUp?'up':'down'}">${isUp?'+':''}${change.toFixed(2)} (${isUp?'+':''}${changePct.toFixed(2)}%)</span> today` : '';
     document.getElementById('r-name').textContent   = profile.name || currentTicker;
     document.getElementById('r-badge').textContent  = (profile.finnhubIndustry || profile.exchange || '');
 
@@ -3284,12 +3302,10 @@ async function lookupTicker(sym) {
     loadNews(currentTicker);
 
   } catch(e) {
-    if (e.message === 'NO_KEY') {
-      document.getElementById('r-name').textContent = 'Enter your Finnhub API key above';
-    } else {
-      document.getElementById('r-name').textContent = 'Error loading data: ' + e.message;
-    }
+    const msg = e.message === 'NO_KEY' ? 'Enter your Finnhub API key above' : e.message;
+    document.getElementById('r-name').innerHTML = `<span style="color:var(--red)">⚠ ${msg}</span>`;
     document.getElementById('chart-stock-loading').textContent = 'Chart unavailable';
+    document.getElementById('r-fundamentals').innerHTML = `<div style="color:var(--red);font-size:12px">${msg}</div>`;
   }
 }
 
@@ -3515,13 +3531,22 @@ Be direct, specific, and data-driven. Keep total response under 400 words.`;
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-dangerous-allow-browser': 'true'
+      },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1000,
         messages: [{ role: 'user', content: prompt }]
       })
     });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error('API error ' + response.status + ': ' + errText.slice(0, 100));
+    }
+
     const data = await response.json();
     const text = data.content?.[0]?.text || 'No response received.';
 
@@ -3701,14 +3726,15 @@ document.addEventListener('click', e => {
     <button class="btn btn-primary" onclick="lookupTicker(document.getElementById('research-search').value.trim().toUpperCase())">
       Analyze
     </button>
-    <input id="finnhub-key" type="text" placeholder="Finnhub API key"
+    <input id="finnhub-key" type="text" placeholder="Paste Finnhub API key here"
       autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
       style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);
-             font-family:'JetBrains Mono',monospace;font-size:12px;padding:9px 12px;border-radius:8px;outline:none;width:180px;
+             font-family:'JetBrains Mono',monospace;font-size:12px;padding:9px 12px;border-radius:8px;outline:none;width:200px;
              -webkit-text-security:disc"
-      onchange="saveFinnhubKey(this.value)"
+      oninput="saveFinnhubKey(this.value)"
       onfocus="this.style.webkitTextSecurity='none'"
       onblur="this.style.webkitTextSecurity='disc'">
+    <span id="key-saved-badge" style="display:none;font-size:11px;color:var(--green)">✓ Key saved</span>
   </div>
 
   <!-- Watchlist row -->
