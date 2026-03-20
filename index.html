@@ -658,6 +658,9 @@
 </head>
 <body>
 <div class="app">
+<!-- Suppress browser password autofill -->
+<input type="text" style="display:none" aria-hidden="true" tabindex="-1">
+<input type="password" style="display:none" aria-hidden="true" tabindex="-1">
 
 <!-- ── Sign-in overlay ── -->
 <div id="signin-overlay" style="
@@ -1221,11 +1224,11 @@
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="proj-input-group">
         <label>Plaid Client ID</label>
-        <input type="text" id="plaid-client-id" placeholder="your_client_id" style="width:240px">
+        <input type="text" id="plaid-client-id" placeholder="your_client_id" autocomplete="off" style="width:240px">
       </div>
       <div class="proj-input-group">
         <label>Plaid Secret</label>
-        <input type="password" id="plaid-secret" placeholder="your_secret" style="width:240px">
+        <input type="text" id="plaid-secret" placeholder="your_secret" autocomplete="off" autocorrect="off" spellcheck="false" style="width:240px;-webkit-text-security:disc">
       </div>
       <div class="proj-input-group">
         <label>Environment</label>
@@ -3698,10 +3701,14 @@ document.addEventListener('click', e => {
     <button class="btn btn-primary" onclick="lookupTicker(document.getElementById('research-search').value.trim().toUpperCase())">
       Analyze
     </button>
-    <input id="finnhub-key" type="password" placeholder="Finnhub API key"
+    <input id="finnhub-key" type="text" placeholder="Finnhub API key"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
       style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);
-             font-family:'JetBrains Mono',monospace;font-size:12px;padding:9px 12px;border-radius:8px;outline:none;width:180px"
-      onchange="saveFinnhubKey(this.value)">
+             font-family:'JetBrains Mono',monospace;font-size:12px;padding:9px 12px;border-radius:8px;outline:none;width:180px;
+             -webkit-text-security:disc"
+      onchange="saveFinnhubKey(this.value)"
+      onfocus="this.style.webkitTextSecurity='none'"
+      onblur="this.style.webkitTextSecurity='disc'">
   </div>
 
   <!-- Watchlist row -->
