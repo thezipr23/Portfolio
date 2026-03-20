@@ -1100,10 +1100,11 @@ function initFirebase() {
 function signInWithGoogle() {
   if (!firebaseReady) { useOfflineMode(); return; }
   const btn = document.getElementById('google-signin-btn');
-  btn.textContent = 'Signing in…';
+  btn.textContent = 'Redirecting to Google…';
   btn.disabled = true;
   const provider = new firebase.auth.GoogleAuthProvider();
-  auth.signInWithPopup(provider).catch(err => {
+  // Use redirect instead of popup — works on all browsers including Safari/iOS
+  auth.signInWithRedirect(provider).catch(err => {
     const errEl = document.getElementById('signin-error');
     errEl.textContent = 'Sign-in failed: ' + err.message;
     errEl.style.display = 'block';
@@ -2687,6 +2688,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Show sign-in overlay while we check auth state
   showSignInOverlay();
+
+  // Handle redirect result (fires after returning from Google sign-in)
+  auth.getRedirectResult().catch(err => {
+    if (err.code !== 'auth/no-auth-event') {
+      const errEl = document.getElementById('signin-error');
+      if (errEl) { errEl.textContent = 'Sign-in failed: ' + err.message; errEl.style.display = 'block'; }
+    }
+  });
 
   auth.onAuthStateChanged(async user => {
     if (user) {
