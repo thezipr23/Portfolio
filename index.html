@@ -7,6 +7,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <style>
   :root {
     --bg: #080c10;
@@ -479,7 +482,46 @@
 <body>
 <div class="app">
 
-<!-- Header -->
+<!-- ── Sign-in overlay ── -->
+<div id="signin-overlay" style="
+  display:none; position:fixed; inset:0; z-index:9999;
+  background:var(--bg); align-items:center; justify-content:center;
+  flex-direction:column; gap:24px;">
+  <div style="text-align:center">
+    <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;letter-spacing:-1px;margin-bottom:8px">
+      PORT<span style="color:var(--accent)">FOLIO</span>
+    </div>
+    <div style="font-size:12px;color:var(--text3)">Your investment tracker — synced across all devices</div>
+  </div>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;width:340px;text-align:center">
+    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">Sign in to continue</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:24px;line-height:1.6">
+      Your portfolio data is encrypted and stored securely.<br>Only your Google account can access it.
+    </div>
+    <button id="google-signin-btn" onclick="signInWithGoogle()" style="
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      width:100%;padding:12px 20px;border-radius:8px;border:1px solid var(--border2);
+      background:var(--surface2);color:var(--text);font-family:'JetBrains Mono',monospace;
+      font-size:13px;cursor:pointer;transition:all 0.15s">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      Continue with Google
+    </button>
+    <div id="signin-error" style="margin-top:12px;font-size:11px;color:var(--red);display:none"></div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <button onclick="useOfflineMode()" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace">
+        Use without syncing (local only)
+      </button>
+    </div>
+  </div>
+  <div id="firebase-config-notice" style="background:var(--gold-dim);border:1px solid var(--gold);border-radius:8px;padding:12px 16px;width:340px;font-size:11px;color:var(--gold);line-height:1.8;display:none">
+    ⚙️ <strong>Firebase not configured yet.</strong><br>
+    Follow the setup instructions below to enable sync.<br>
+    You can still use the app in local-only mode.
+  </div>
+</div>
+
+<!-- ── Sync status bar (shown in header area) ── -->
+
 <header>
   <div class="logo">PORT<span>FOLIO</span></div>
   <div class="header-meta">
@@ -487,7 +529,20 @@
     <span id="last-updated">No data loaded</span>
     <span>·</span>
     <span id="mkt-status">Market Hours: 9:30–4:00 ET</span>
-    <button class="btn btn-ghost btn-sm" onclick="clearState()" style="font-size:10px;padding:4px 10px;color:var(--text3);border-color:var(--border)">Clear Data</button>
+    <div id="sync-indicator" style="display:none;align-items:center;gap:6px;font-size:11px;color:var(--text3)">
+      <div id="sync-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green)"></div>
+      <span id="sync-label">Synced</span>
+    </div>
+    <div id="user-pill" style="display:none;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 12px 4px 6px;cursor:pointer" onclick="showUserMenu()">
+      <img id="user-avatar" src="" width="22" height="22" style="border-radius:50%;display:none">
+      <span id="user-name" style="font-size:11px;color:var(--text2)"></span>
+    </div>
+    <div id="user-menu" style="display:none;position:absolute;top:52px;right:28px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:8px;min-width:180px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
+      <div id="user-menu-email" style="font-size:10px;color:var(--text3);padding:4px 8px 8px;border-bottom:1px solid var(--border)"></div>
+      <button onclick="clearState()" style="display:block;width:100%;text-align:left;background:none;border:none;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='none'">🗑 Clear All Data</button>
+      <button onclick="signOut()" style="display:block;width:100%;text-align:left;background:none;border:none;color:var(--red);font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='none'">↩ Sign Out</button>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="offline-clear-btn" onclick="clearState()" style="font-size:10px;padding:4px 10px;color:var(--text3);border-color:var(--border);display:none">Clear Data</button>
   </div>
 </header>
 
@@ -995,56 +1050,222 @@
 
 <script>
 // ══════════════════════════════════════
+// FIREBASE CONFIG — fill in after setup
+// ══════════════════════════════════════
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyBSf62Q6jGR5IIkuMkTivYFySKF-jfBrZQ",
+  authDomain:        "portfolio-14d26.firebaseapp.com",
+  projectId:         "portfolio-14d26",
+  storageBucket:     "portfolio-14d26.firebasestorage.app",
+  messagingSenderId: "933633533800",
+  appId:             "1:933633533800:web:4a3ed3ca98b0e1366358dd"
+};
+
+// ══════════════════════════════════════
 // STATE
 // ══════════════════════════════════════
 const STORAGE_KEY = 'portfolio_tracker_v1';
 
 const state = {
-  accounts: [],    // { id, broker, name, type, positions[], cash, value, costBasis }
-  snapshots: [],   // { date, value } for portfolio chart
-  plaid: { clientId:'', secret:'', env:'sandbox' }
+  accounts: [],
+  snapshots: [],
+  plaid: { clientId:'', secret:'', env:'sandbox' },
+  user: null,        // Firebase user object
+  offlineMode: false // true = skip Firebase, use localStorage only
 };
 
-function saveState() {
+// ── Firebase instances ──────────────────
+let db   = null;
+let auth = null;
+let firebaseReady = false;
+
+function initFirebase() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      accounts: state.accounts,
-      snapshots: state.snapshots,
-      plaid: state.plaid,
-      savedAt: new Date().toISOString()
-    }));
+    if (FIREBASE_CONFIG.apiKey === 'REPLACE_API_KEY') {
+      console.log('Firebase not configured — running in local mode');
+      return false;
+    }
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db   = firebase.firestore();
+    auth = firebase.auth();
+    firebaseReady = true;
+    return true;
   } catch(e) {
-    console.warn('Could not save to localStorage:', e);
+    console.warn('Firebase init failed:', e);
+    return false;
   }
 }
 
-function loadState() {
+// ── Auth ────────────────────────────────
+function signInWithGoogle() {
+  if (!firebaseReady) { useOfflineMode(); return; }
+  const btn = document.getElementById('google-signin-btn');
+  btn.textContent = 'Signing in…';
+  btn.disabled = true;
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(err => {
+    const errEl = document.getElementById('signin-error');
+    errEl.textContent = 'Sign-in failed: ' + err.message;
+    errEl.style.display = 'block';
+    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> Continue with Google`;
+    btn.disabled = false;
+  });
+}
+
+function useOfflineMode() {
+  state.offlineMode = true;
+  hideSignInOverlay();
+  showOfflineUI();
+  const hadData = loadFromLocalStorage();
+  if (hadData) { restoreStatusBadges(); renderAll(); }
+  updateProjections();
+}
+
+function signOut() {
+  hideUserMenu();
+  if (auth) auth.signOut();
+  state.user = null;
+  state.accounts = [];
+  state.snapshots = [];
+  showSignInOverlay();
+  hideOfflineUI();
+}
+
+function showUserMenu()  { document.getElementById('user-menu').style.display = 'block'; }
+function hideUserMenu()  { document.getElementById('user-menu').style.display = 'none'; }
+document.addEventListener('click', e => {
+  if (!e.target.closest('#user-pill') && !e.target.closest('#user-menu')) hideUserMenu();
+});
+
+// ── UI helpers ──────────────────────────
+function showSignInOverlay() {
+  const overlay = document.getElementById('signin-overlay');
+  overlay.style.display = 'flex';
+  if (!firebaseReady) {
+    document.getElementById('firebase-config-notice').style.display = 'block';
+  }
+}
+function hideSignInOverlay() {
+  document.getElementById('signin-overlay').style.display = 'none';
+}
+function showOfflineUI() {
+  document.getElementById('offline-clear-btn').style.display = 'inline-flex';
+}
+function hideOfflineUI() {
+  document.getElementById('offline-clear-btn').style.display = 'none';
+}
+function setSyncStatus(status) {
+  // status: 'syncing' | 'synced' | 'offline' | 'error'
+  const dot   = document.getElementById('sync-dot');
+  const label = document.getElementById('sync-label');
+  const ind   = document.getElementById('sync-indicator');
+  ind.style.display = 'flex';
+  const map = {
+    syncing: { color:'var(--gold)',  text:'Syncing…' },
+    synced:  { color:'var(--green)', text:'Synced' },
+    offline: { color:'var(--text3)', text:'Offline' },
+    error:   { color:'var(--red)',   text:'Sync error' },
+  };
+  const s = map[status] || map.synced;
+  dot.style.background = s.color;
+  label.textContent = s.text;
+}
+
+function setUserUI(user) {
+  const pill   = document.getElementById('user-pill');
+  const avatar = document.getElementById('user-avatar');
+  const name   = document.getElementById('user-name');
+  const menuEmail = document.getElementById('user-menu-email');
+  pill.style.display = 'flex';
+  if (user.photoURL) { avatar.src = user.photoURL; avatar.style.display = 'block'; }
+  name.textContent = user.displayName ? user.displayName.split(' ')[0] : user.email.split('@')[0];
+  menuEmail.textContent = user.email;
+}
+
+// ── Save / Load ─────────────────────────
+async function saveState() {
+  const payload = {
+    accounts:  state.accounts,
+    snapshots: state.snapshots,
+    savedAt:   new Date().toISOString()
+  };
+
+  // Always write localStorage as fallback
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch(e) {}
+
+  // Write Firestore if signed in
+  if (firebaseReady && state.user && !state.offlineMode) {
+    setSyncStatus('syncing');
+    try {
+      await db.collection('portfolios').doc(state.user.uid).set(payload);
+      setSyncStatus('synced');
+      document.getElementById('last-updated').textContent =
+        'Synced · ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    } catch(e) {
+      console.warn('Firestore save failed:', e);
+      setSyncStatus('error');
+    }
+  }
+}
+
+async function loadFromFirestore(uid) {
+  try {
+    setSyncStatus('syncing');
+    const doc = await db.collection('portfolios').doc(uid).get();
+    if (doc.exists) {
+      const data = doc.data();
+      if (data.accounts)  state.accounts  = data.accounts;
+      if (data.snapshots) state.snapshots = data.snapshots;
+      // Also write to localStorage as cache
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
+      setSyncStatus('synced');
+      return true;
+    }
+    setSyncStatus('synced');
+    return false;
+  } catch(e) {
+    console.warn('Firestore load failed, falling back to localStorage:', e);
+    setSyncStatus('offline');
+    return loadFromLocalStorage();
+  }
+}
+
+function loadFromLocalStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return false;
     const saved = JSON.parse(raw);
     if (saved.accounts)  state.accounts  = saved.accounts;
     if (saved.snapshots) state.snapshots = saved.snapshots;
-    if (saved.plaid)     state.plaid     = saved.plaid;
     return saved.accounts && saved.accounts.length > 0;
-  } catch(e) {
-    console.warn('Could not load from localStorage:', e);
-    return false;
-  }
+  } catch(e) { return false; }
+}
+
+function restoreStatusBadges() {
+  const brokers = new Set(state.accounts.map(a => a.broker));
+  const has401k = state.accounts.some(a => a.type === '401(k)');
+  if (brokers.has('Fidelity'))  { const el = document.getElementById('fid-status');   if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
+  if (brokers.has('Vanguard'))  { const el = document.getElementById('van-status');   if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
+  if (brokers.has('Robinhood')) { const el = document.getElementById('rh-status');    if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
+  if (has401k)                  { const el = document.getElementById('v401k-status'); if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
 }
 
 function clearState() {
   if (!confirm('Clear all imported data? This cannot be undone.')) return;
+  // Clear Firestore
+  if (firebaseReady && state.user) {
+    db.collection('portfolios').doc(state.user.uid).delete().catch(()=>{});
+  }
   localStorage.removeItem(STORAGE_KEY);
   state.accounts  = [];
   state.snapshots = [];
   renderAll();
-  // Reset import status indicators
   ['fid-status','van-status','rh-status','v401k-status'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.textContent = 'Not imported'; el.className = 'broker-status not-connected'; }
   });
   document.getElementById('last-updated').textContent = 'No data loaded';
+  hideUserMenu();
 }
 
 // ══════════════════════════════════════
@@ -2443,28 +2664,6 @@ document.addEventListener('DOMContentLoaded', () => {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 
-  // Restore saved data
-  const hadData = loadState();
-  if (hadData) {
-    // Restore import status badges
-    const brokers = new Set(state.accounts.map(a => a.broker));
-    const has401k = state.accounts.some(a => a.type === '401(k)');
-    if (brokers.has('Fidelity'))  { const el = document.getElementById('fid-status');   if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
-    if (brokers.has('Vanguard'))  { const el = document.getElementById('van-status');   if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
-    if (brokers.has('Robinhood')) { const el = document.getElementById('rh-status');    if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
-    if (has401k)                  { const el = document.getElementById('v401k-status'); if(el){el.textContent='Imported ✓';el.className='broker-status connected';} }
-
-    // Restore plaid config fields if present
-    if (state.plaid.clientId) { const el = document.getElementById('plaid-client-id'); if(el) el.value = state.plaid.clientId; }
-    if (state.plaid.env)      { const el = document.getElementById('plaid-env');        if(el) el.value = state.plaid.env; }
-
-    const savedAt = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').savedAt;
-    const label = savedAt ? 'Restored · saved ' + new Date(savedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Data restored';
-    document.getElementById('last-updated').textContent = label;
-
-    renderAll();
-  }
-
   updateProjections();
 
   // Market hours indicator
@@ -2476,6 +2675,60 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   updateMarket();
   setInterval(updateMarket, 60000);
+
+  // Init Firebase and handle auth
+  const ok = initFirebase();
+
+  if (!ok) {
+    // Firebase not configured — go straight to local mode
+    showSignInOverlay();
+    return;
+  }
+
+  // Show sign-in overlay while we check auth state
+  showSignInOverlay();
+
+  auth.onAuthStateChanged(async user => {
+    if (user) {
+      // Signed in
+      state.user = user;
+      hideSignInOverlay();
+      setUserUI(user);
+      document.getElementById('sync-indicator').style.display = 'flex';
+
+      // Load data from Firestore
+      const hadData = await loadFromFirestore(user.uid);
+      if (hadData) {
+        restoreStatusBadges();
+        const savedAt = state.accounts.length ? new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '';
+        document.getElementById('last-updated').textContent = 'Synced · ' + savedAt;
+        renderAll();
+      }
+
+      // Set up real-time listener for changes from other devices
+      db.collection('portfolios').doc(user.uid).onSnapshot(doc => {
+        if (!doc.exists) return;
+        const data = doc.data();
+        // Only update if data changed (avoid loop from our own saves)
+        const newHash = JSON.stringify(data.accounts || []).length;
+        const curHash = JSON.stringify(state.accounts).length;
+        if (newHash !== curHash) {
+          if (data.accounts)  state.accounts  = data.accounts;
+          if (data.snapshots) state.snapshots = data.snapshots;
+          restoreStatusBadges();
+          renderAll();
+          setSyncStatus('synced');
+          document.getElementById('last-updated').textContent =
+            'Synced · ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+        }
+      });
+
+    } else {
+      // Not signed in — show overlay
+      state.user = null;
+      showSignInOverlay();
+    }
+  });
 });
 </script>
 <!-- Hidden file inputs — must be outside hidden pages so .click() works from any tab -->
