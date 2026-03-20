@@ -604,7 +604,25 @@
     .connect-grid { grid-template-columns: repeat(2,1fr); }
   }
 
-  /* Prevent iOS zoom on input focus — must be ≥16px */
+  /* ── Positions table responsive toggle ── */
+  @media (max-width: 600px) {
+    .tbl-desktop { display: none !important; }
+    .tbl-mobile  { display: table !important; min-width: unset; }
+    .tbl-mobile td, .tbl-mobile th { padding: 12px 10px; }
+  }
+  @media (min-width: 601px) {
+    .tbl-mobile  { display: none !important; }
+    .tbl-desktop { display: table !important; }
+  }
+
+  /* ── Header mobile fixes ── */
+  @media (max-width: 600px) {
+    .header-meta { gap: 8px; }
+    #mkt-status { display: none; }           /* hide market status on mobile */
+    #sync-indicator .sync-text { display: none; } /* hide "Synced" text, keep dot */
+    #last-updated { display: none; }         /* hide timestamp — shown in user menu instead */
+    .header-meta > span { display: none; }   /* hide separator dots */
+  }
   @media (max-width: 600px) {
     input, select, textarea {
       font-size: 16px !important;
@@ -835,8 +853,9 @@
     </div>
   </div>
 
-  <div class="card">
-    <table class="tbl" id="tbl-positions">
+  <div class="card" style="overflow-x:auto">
+    <!-- Desktop table (hidden on mobile) -->
+    <table class="tbl tbl-desktop" id="tbl-positions">
       <thead>
         <tr>
           <th onclick="sortPositions('symbol')">Symbol ↕</th>
@@ -852,6 +871,21 @@
       </thead>
       <tbody id="tbody-positions">
         <tr><td colspan="9"><div class="empty"><div class="em-icon">📈</div><div class="em-title">No positions loaded</div><div class="em-sub">Import your portfolio CSV files to see positions.</div></div></td></tr>
+      </tbody>
+    </table>
+
+    <!-- Mobile table (hidden on desktop) -->
+    <table class="tbl tbl-mobile" id="tbl-positions-mobile" style="display:none">
+      <thead>
+        <tr>
+          <th onclick="sortPositions('symbol')">Symbol</th>
+          <th onclick="sortPositions('value')" class="num">Value</th>
+          <th onclick="sortPositions('gainPct')" class="num">Return</th>
+          <th class="num" style="width:28px"></th>
+        </tr>
+      </thead>
+      <tbody id="tbody-positions-mobile">
+        <tr><td colspan="4"><div class="empty"><div class="em-icon">📈</div><div class="em-title">No positions loaded</div></div></td></tr>
       </tbody>
     </table>
   </div>
@@ -2484,29 +2518,72 @@ function renderPositions() {
   filterPositions();
 }
 
+function shortAccountName(accountName, broker) {
+  if (!accountName) return broker || 'Unknown';
+  const a = accountName.trim().toLowerCase();
+  const b = broker || '';
+  if (a.includes('401')) return b + ' 401(k)';
+  if (a.includes('roth')) return b + ' Roth IRA';
+  if (a.includes('rollover')) return b + ' Rollover';
+  if (a.includes('ira')) return b + ' IRA';
+  if (a.includes('robinhood')) return 'Robinhood';
+  if (a.includes('brokerage')) return b + ' Brokerage';
+  return b || accountName.slice(0, 16);
+}
+
 function renderPositionsTable(positions) {
-  const tbody = document.getElementById('tbody-positions');
+  const emptyDesktop = `<tr><td colspan="9"><div class="empty"><div class="em-icon">&#x1F4C8;</div><div class="em-title">No positions</div><div class="em-sub">Import your CSV files to see holdings.</div></div></td></tr>`;
+  const emptyMobile  = `<tr><td colspan="4"><div class="empty" style="padding:24px"><div class="em-icon">&#x1F4C8;</div><div class="em-title">No positions</div></div></td></tr>`;
+
+  const tbody       = document.getElementById('tbody-positions');
+  const tbodyMobile = document.getElementById('tbody-positions-mobile');
+
   if (positions.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="em-icon">📈</div><div class="em-title">No positions</div><div class="em-sub">Import your CSV files to see holdings.</div></div></td></tr>`;
+    tbody.innerHTML = emptyDesktop;
+    if (tbodyMobile) tbodyMobile.innerHTML = emptyMobile;
     return;
   }
 
-  tbody.innerHTML = positions.map(p => {
-    const gain = p.value - p.costBasis;
+  const rows = positions.map(p => {
+    const gain      = p.value - p.costBasis;
     const returnPct = p.costBasis > 0 ? (gain / p.costBasis) * 100 : 0;
-    const cls = returnPct >= 0 ? 'up' : 'down';
-    return `<tr onclick="showPositionDetail(${JSON.stringify(p).replace(/"/g,'&quot;')})" style="cursor:pointer">
+    const cls       = returnPct >= 0 ? 'up' : 'down';
+    const acctShort = shortAccountName(p.accountName, p.broker);
+    const dataAttr  = JSON.stringify(p).replace(/"/g, '&quot;');
+
+    const desktop = `<tr onclick="showPositionDetail(${dataAttr})" style="cursor:pointer">
       <td class="sym">${p.symbol}</td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text3)">${p.name || '—'}</td>
-      <td style="color:var(--text3)">${p.accountName}</td>
-      <td class="num">${p.shares > 0 ? p.shares.toLocaleString('en-US',{maximumFractionDigits:4}) : '—'}</td>
-      <td class="num">${p.price > 0 ? fmt(p.price) : '—'}</td>
-      <td class="num">${p.value > 0 ? fmt(p.value) : '—'}</td>
-      <td class="num">${p.costBasis > 0 ? fmt(p.costBasis) : '—'}</td>
-      <td class="num ${p.costBasis > 0 ? cls : ''}">${p.costBasis > 0 ? fmt(gain) : '—'}</td>
-      <td class="num ${p.costBasis > 0 ? cls : ''}">${p.costBasis > 0 ? fmtPct(returnPct) : '—'}</td>
+      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text3)">${p.name || ''}</td>
+      <td style="color:var(--text3);white-space:nowrap">${acctShort}</td>
+      <td class="num">${p.shares > 0 ? p.shares.toLocaleString('en-US',{maximumFractionDigits:4}) : '--'}</td>
+      <td class="num">${p.price > 0 ? fmt(p.price) : '--'}</td>
+      <td class="num">${p.value > 0 ? fmt(p.value) : '--'}</td>
+      <td class="num">${p.costBasis > 0 ? fmt(p.costBasis) : '--'}</td>
+      <td class="num ${p.costBasis > 0 ? cls : ''}">${p.costBasis > 0 ? fmt(gain) : '--'}</td>
+      <td class="num ${p.costBasis > 0 ? cls : ''}">${p.costBasis > 0 ? fmtPct(returnPct) : '--'}</td>
     </tr>`;
-  }).join('');
+
+    const mobile = `<tr onclick="showPositionDetail(${dataAttr})" style="cursor:pointer">
+      <td>
+        <div style="font-weight:600;color:var(--text);font-size:14px">${p.symbol}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">${acctShort}</div>
+      </td>
+      <td class="num">
+        <div style="color:var(--text)">${p.value > 0 ? fmt(p.value) : '--'}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">${p.shares > 0 ? p.shares.toLocaleString('en-US',{maximumFractionDigits:3}) + ' sh' : ''}</div>
+      </td>
+      <td class="num ${p.costBasis > 0 ? cls : ''}">
+        <div style="font-weight:600">${p.costBasis > 0 ? fmtPct(returnPct) : '--'}</div>
+        <div style="font-size:11px;margin-top:3px;opacity:0.75">${p.costBasis > 0 ? fmt(gain) : ''}</div>
+      </td>
+      <td style="color:var(--text3);text-align:right;font-size:16px;padding-right:8px">&#x203A;</td>
+    </tr>`;
+
+    return { desktop, mobile };
+  });
+
+  tbody.innerHTML = rows.map(r => r.desktop).join('');
+  if (tbodyMobile) tbodyMobile.innerHTML = rows.map(r => r.mobile).join('');
 }
 
 function showPositionDetail(p) {
